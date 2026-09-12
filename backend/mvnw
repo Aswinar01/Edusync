@@ -1,0 +1,20 @@
+#!/bin/sh
+# ----------------------------------------------------------------------------
+# Maven Wrapper Script for EduSync Backend
+# ----------------------------------------------------------------------------
+
+set -e
+
+if command -v mvn >/dev/null 2>&1; then
+    MAVEN_CMD="mvn"
+else
+    WRAPPER_DIST=$(find "$HOME/.m2/wrapper/dists" -name "mvn" -type f 2>/dev/null | head -n 1)
+    if [ -n "$WRAPPER_DIST" ] && [ -x "$WRAPPER_DIST" ]; then
+        MAVEN_CMD="$WRAPPER_DIST"
+    else
+        echo "Error: Maven not found on PATH or ~/.m2/wrapper/dists. Please install Maven." >&2
+        exit 1
+    fi
+fi
+
+exec "$MAVEN_CMD" "$@"
