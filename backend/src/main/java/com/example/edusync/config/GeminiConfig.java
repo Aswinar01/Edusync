@@ -17,6 +17,7 @@ public class GeminiConfig {
     }
 
     @Bean
+    @org.springframework.context.annotation.Primary
     public RestClient.Builder geminiRestClientBuilder() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(geminiProperties.getConnectTimeoutMs()));
@@ -27,6 +28,7 @@ public class GeminiConfig {
     }
 
     @Bean
+    @org.springframework.context.annotation.Primary
     public RestClient geminiRestClient(RestClient.Builder geminiRestClientBuilder) {
         return geminiRestClientBuilder.build();
     }
