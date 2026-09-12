@@ -1,6 +1,7 @@
 package com.example.edusync.controller;
 
 import com.example.edusync.model.ErrorResponse;
+import com.example.edusync.service.DocumentExtractionException;
 import com.example.edusync.service.InvalidDocumentException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +20,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInvalidDocument(InvalidDocumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ErrorResponse("Bad Request", ex.getMessage()));
+    }
+
+    @ExceptionHandler(DocumentExtractionException.class)
+    public ResponseEntity<ErrorResponse> handleDocumentExtraction(DocumentExtractionException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse("Unprocessable Entity", ex.getMessage()));
     }
 
     @ExceptionHandler({
