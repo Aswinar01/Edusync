@@ -31,12 +31,21 @@ public class DocumentProcessingService {
     private final SentenceSegmentationService sentenceSegmentationService;
     private final DocumentAnalysisOrchestrator documentAnalysisOrchestrator;
     private final ReviewService reviewService;
+    private final DocumentStorageService documentStorageService;
 
     public DocumentProcessingService(DocumentService documentService,
                                      TextExtractionService textExtractionService,
                                      SentenceSegmentationService sentenceSegmentationService,
                                      DocumentAnalysisOrchestrator documentAnalysisOrchestrator) {
-        this(documentService, textExtractionService, sentenceSegmentationService, documentAnalysisOrchestrator, null);
+        this(documentService, textExtractionService, sentenceSegmentationService, documentAnalysisOrchestrator, null, null);
+    }
+
+    public DocumentProcessingService(DocumentService documentService,
+                                     TextExtractionService textExtractionService,
+                                     SentenceSegmentationService sentenceSegmentationService,
+                                     DocumentAnalysisOrchestrator documentAnalysisOrchestrator,
+                                     ReviewService reviewService) {
+        this(documentService, textExtractionService, sentenceSegmentationService, documentAnalysisOrchestrator, reviewService, null);
     }
 
     @Autowired
@@ -44,12 +53,14 @@ public class DocumentProcessingService {
                                      TextExtractionService textExtractionService,
                                      SentenceSegmentationService sentenceSegmentationService,
                                      DocumentAnalysisOrchestrator documentAnalysisOrchestrator,
-                                     ReviewService reviewService) {
+                                     ReviewService reviewService,
+                                     DocumentStorageService documentStorageService) {
         this.documentService = documentService;
         this.textExtractionService = textExtractionService;
         this.sentenceSegmentationService = sentenceSegmentationService;
         this.documentAnalysisOrchestrator = documentAnalysisOrchestrator;
         this.reviewService = reviewService;
+        this.documentStorageService = documentStorageService;
     }
 
     /**
@@ -82,6 +93,22 @@ public class DocumentProcessingService {
         String requestId = UUID.randomUUID().toString();
         log.info("Processing document '{}' ({}) with requestId '{}' - {} sentences extracted.",
                 extractionResult.getFilename(), extractionResult.getDocumentType(), requestId, sentences.size());
+
+        // Step 4b: Store original document bytes immutably for revision workflows
+        if (documentStorageService != null) {
+            try {
+                byte[] fileBytes = file.getBytes();
+                documentStorageService.storeOriginalDocument(
+                        requestId,
+                        extractionResult.getFilename(),
+                        extractionResult.getDocumentType(),
+                        fileBytes
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to store original document for requestId '{}': {}", requestId, ex.getMessage());
+                throw new DocumentExtractionException("Failed to read document bytes for storage: " + extractionResult.getFilename(), ex);
+            }
+        }
 
         // Step 5: Execute orchestrated sentence analysis through the pipeline
         DocumentAnalysisRequest analysisRequest = new DocumentAnalysisRequest(requestId, sentences);

@@ -8,6 +8,8 @@ import com.example.edusync.model.ReviewDecision;
 import com.example.edusync.model.ReviewStatus;
 import com.example.edusync.model.RevisionStatus;
 import com.example.edusync.model.SentenceReviewItem;
+import com.example.edusync.service.revision.DocxRevisionProcessor;
+import com.example.edusync.service.revision.PdfRevisionProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,15 @@ class DocumentRevisionServiceTest {
 
     @Mock
     private ReviewService reviewService;
+
+    @Mock
+    private DocumentStorageService documentStorageService;
+
+    @Mock
+    private PdfRevisionProcessor pdfRevisionProcessor;
+
+    @Mock
+    private DocxRevisionProcessor docxRevisionProcessor;
 
     @InjectMocks
     private DocumentRevisionService documentRevisionService;
@@ -292,5 +303,109 @@ class DocumentRevisionServiceTest {
         assertThat(hasForbiddenConstructorParam)
                 .as("DocumentRevisionService constructor must not accept any forbidden pipeline service")
                 .isFalse();
+    }
+
+    @Test
+    @DisplayName("12. applyRevision for PDF applies processor and stores revised document")
+    void testApplyRevisionPdfSucceeds() {
+        DocumentReviewResult session = new DocumentReviewResult();
+        session.setRequestId("req-pdf");
+        session.setTotalSentences(1);
+        session.setItems(List.of(approvedItem));
+
+        byte[] origBytes = "PDF Bytes".getBytes();
+        byte[] revBytes = "Revised PDF Bytes".getBytes();
+
+        DocumentStorageService.StoredDocument storedDoc = new DocumentStorageService.StoredDocument(
+                "req-pdf", "sample.pdf", com.example.edusync.model.DocumentType.PDF, origBytes, java.time.Instant.now()
+        );
+
+        when(reviewService.getReviewSession("req-pdf")).thenReturn(session);
+        when(documentStorageService.getOriginalDocument("req-pdf")).thenReturn(storedDoc);
+        when(pdfRevisionProcessor.revise(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(revBytes);
+
+        com.example.edusync.model.DocumentRevisionOutput output = documentRevisionService.applyRevision("req-pdf");
+
+        assertThat(output).isNotNull();
+        assertThat(output.getRequestId()).isEqualTo("req-pdf");
+        assertThat(output.getOriginalFilename()).isEqualTo("sample.pdf");
+        assertThat(output.getRevisedFilename()).isEqualTo("revised-sample.pdf");
+        assertThat(output.getDocumentType()).isEqualTo(com.example.edusync.model.DocumentType.PDF);
+        assertThat(output.getRevisionStatus()).isEqualTo(RevisionStatus.READY);
+        assertThat(output.getApprovedUpdateCount()).isEqualTo(1);
+        assertThat(output.getOutputSize()).isEqualTo(revBytes.length);
+        assertThat(output.getDownloadUrl()).isEqualTo("/api/revisions/req-pdf/download");
+
+        org.mockito.Mockito.verify(documentStorageService).storeRevisedDocument(
+                org.mockito.ArgumentMatchers.eq("req-pdf"),
+                org.mockito.ArgumentMatchers.eq("revised-sample.pdf"),
+                org.mockito.ArgumentMatchers.eq(com.example.edusync.model.DocumentType.PDF),
+                org.mockito.ArgumentMatchers.eq(revBytes)
+        );
+    }
+
+    @Test
+    @DisplayName("13. applyRevision for DOCX applies processor and stores revised document")
+    void testApplyRevisionDocxSucceeds() {
+        DocumentReviewResult session = new DocumentReviewResult();
+        session.setRequestId("req-docx");
+        session.setTotalSentences(1);
+        session.setItems(List.of(approvedItem));
+
+        byte[] origBytes = "DOCX Bytes".getBytes();
+        byte[] revBytes = "Revised DOCX Bytes".getBytes();
+
+        DocumentStorageService.StoredDocument storedDoc = new DocumentStorageService.StoredDocument(
+                "req-docx", "sample.docx", com.example.edusync.model.DocumentType.DOCX, origBytes, java.time.Instant.now()
+        );
+
+        when(reviewService.getReviewSession("req-docx")).thenReturn(session);
+        when(documentStorageService.getOriginalDocument("req-docx")).thenReturn(storedDoc);
+        when(docxRevisionProcessor.revise(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(revBytes);
+
+        com.example.edusync.model.DocumentRevisionOutput output = documentRevisionService.applyRevision("req-docx");
+
+        assertThat(output).isNotNull();
+        assertThat(output.getRequestId()).isEqualTo("req-docx");
+        assertThat(output.getRevisedFilename()).isEqualTo("revised-sample.docx");
+        assertThat(output.getDocumentType()).isEqualTo(com.example.edusync.model.DocumentType.DOCX);
+        assertThat(output.getRevisionStatus()).isEqualTo(RevisionStatus.READY);
+    }
+
+    @Test
+    @DisplayName("14. applyRevision with NO_APPROVED_UPDATES preserves original bytes without invoking revision processor")
+    void testApplyRevisionNoApprovedUpdatesPreservesOriginal() {
+        DocumentReviewResult session = new DocumentReviewResult();
+        session.setRequestId("req-none");
+        session.setTotalSentences(1);
+        session.setItems(List.of(rejectedItem));
+
+        byte[] origBytes = "Unchanged Bytes".getBytes();
+
+        DocumentStorageService.StoredDocument storedDoc = new DocumentStorageService.StoredDocument(
+                "req-none", "unchanged.pdf", com.example.edusync.model.DocumentType.PDF, origBytes, java.time.Instant.now()
+        );
+
+        when(reviewService.getReviewSession("req-none")).thenReturn(session);
+        when(documentStorageService.getOriginalDocument("req-none")).thenReturn(storedDoc);
+
+        com.example.edusync.model.DocumentRevisionOutput output = documentRevisionService.applyRevision("req-none");
+
+        assertThat(output.getRevisionStatus()).isEqualTo(RevisionStatus.NO_APPROVED_UPDATES);
+        assertThat(output.getApprovedUpdateCount()).isEqualTo(0);
+
+        org.mockito.Mockito.verifyNoInteractions(pdfRevisionProcessor);
+        org.mockito.Mockito.verifyNoInteractions(docxRevisionProcessor);
+    }
+
+    @Test
+    @DisplayName("15. applyRevision rejects null or blank requestId")
+    void testApplyRevisionRejectsBlankId() {
+        assertThatThrownBy(() -> documentRevisionService.applyRevision(null))
+                .isInstanceOf(ReviewValidationException.class);
+        assertThatThrownBy(() -> documentRevisionService.applyRevision("   "))
+                .isInstanceOf(ReviewValidationException.class);
     }
 }

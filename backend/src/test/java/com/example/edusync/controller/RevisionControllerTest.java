@@ -4,6 +4,7 @@ import com.example.edusync.model.DocumentRevisionItem;
 import com.example.edusync.model.DocumentRevisionResult;
 import com.example.edusync.model.RevisionStatus;
 import com.example.edusync.service.DocumentRevisionService;
+import com.example.edusync.service.DocumentStorageService;
 import com.example.edusync.service.ReviewValidationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,9 @@ class RevisionControllerTest {
 
     @MockitoBean
     private DocumentRevisionService documentRevisionService;
+
+    @MockitoBean
+    private DocumentStorageService documentStorageService;
 
     @Test
     @DisplayName("POST /api/revisions/{requestId}/prepare - Valid requestId with approved updates returns 200 OK with READY status")
@@ -116,5 +120,91 @@ class RevisionControllerTest {
 
         // Confirm that the service was called ONLY with the path variable requestId
         verify(documentRevisionService).prepareRevision("req-sec");
+    }
+
+    @Test
+    @DisplayName("POST /api/revisions/{requestId}/apply - Valid requestId returns 200 OK with DocumentRevisionOutput")
+    void testApplyRevisionReturns200() throws Exception {
+        com.example.edusync.model.DocumentRevisionOutput output = new com.example.edusync.model.DocumentRevisionOutput(
+                "req-apply-1",
+                "sample.pdf",
+                "revised-sample.pdf",
+                com.example.edusync.model.DocumentType.PDF,
+                RevisionStatus.READY,
+                1,
+                1024L,
+                "2026-09-12T12:00:00Z",
+                "/api/revisions/req-apply-1/download"
+        );
+
+        when(documentRevisionService.applyRevision(eq("req-apply-1"))).thenReturn(output);
+
+        mockMvc.perform(post("/api/revisions/req-apply-1/apply"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestId").value("req-apply-1"))
+                .andExpect(jsonPath("$.originalFilename").value("sample.pdf"))
+                .andExpect(jsonPath("$.revisedFilename").value("revised-sample.pdf"))
+                .andExpect(jsonPath("$.revisionStatus").value("READY"))
+                .andExpect(jsonPath("$.approvedUpdateCount").value(1))
+                .andExpect(jsonPath("$.downloadUrl").value("/api/revisions/req-apply-1/download"));
+
+        verify(documentRevisionService).applyRevision("req-apply-1");
+    }
+
+    @Test
+    @DisplayName("POST /api/revisions/{requestId}/apply - SentenceLocationException returns 422 Unprocessable Entity")
+    void testApplyRevisionLocationExceptionReturns422() throws Exception {
+        when(documentRevisionService.applyRevision(eq("req-loc-err")))
+                .thenThrow(new com.example.edusync.service.revision.SentenceLocationException("Could not locate sentence coordinates"));
+
+        mockMvc.perform(post("/api/revisions/req-loc-err/apply"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("Unprocessable Entity"))
+                .andExpect(jsonPath("$.message").value("Could not locate sentence coordinates"));
+    }
+
+    @Test
+    @DisplayName("GET /api/revisions/{requestId}/download - Streams PDF with proper headers")
+    void testDownloadPdfReturnsStream() throws Exception {
+        byte[] pdfContent = "Fake PDF stream bytes".getBytes();
+        DocumentStorageService.StoredDocument doc = new DocumentStorageService.StoredDocument(
+                "req-dl-pdf",
+                "revised-sample.pdf",
+                com.example.edusync.model.DocumentType.PDF,
+                pdfContent,
+                java.time.Instant.now()
+        );
+
+        when(documentStorageService.getRevisedDocument(eq("req-dl-pdf"))).thenReturn(doc);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/revisions/req-dl-pdf/download"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentType(MediaType.APPLICATION_PDF))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string(
+                        org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"revised-sample.pdf\""))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(pdfContent));
+    }
+
+    @Test
+    @DisplayName("GET /api/revisions/{requestId}/download - Streams DOCX with proper headers")
+    void testDownloadDocxReturnsStream() throws Exception {
+        byte[] docxContent = "Fake DOCX stream bytes".getBytes();
+        DocumentStorageService.StoredDocument doc = new DocumentStorageService.StoredDocument(
+                "req-dl-docx",
+                "revised-sample.docx",
+                com.example.edusync.model.DocumentType.DOCX,
+                docxContent,
+                java.time.Instant.now()
+        );
+
+        when(documentStorageService.getRevisedDocument(eq("req-dl-docx"))).thenReturn(doc);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/revisions/req-dl-docx/download"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentType(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string(
+                        org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"revised-sample.docx\""))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(docxContent));
     }
 }

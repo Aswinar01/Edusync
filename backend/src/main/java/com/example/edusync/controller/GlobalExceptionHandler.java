@@ -17,6 +17,18 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(com.example.edusync.service.revision.SentenceLocationException.class)
+    public ResponseEntity<ErrorResponse> handleSentenceLocation(com.example.edusync.service.revision.SentenceLocationException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse("Unprocessable Entity", ex.getMessage()));
+    }
+
+    @ExceptionHandler(com.example.edusync.service.revision.RevisionException.class)
+    public ResponseEntity<ErrorResponse> handleRevisionException(com.example.edusync.service.revision.RevisionException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(new ErrorResponse("Unprocessable Entity", ex.getMessage()));
+    }
+
     @ExceptionHandler(ReviewValidationException.class)
     public ResponseEntity<ErrorResponse> handleReviewValidation(ReviewValidationException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
