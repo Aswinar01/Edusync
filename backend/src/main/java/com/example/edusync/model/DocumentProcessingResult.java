@@ -12,6 +12,7 @@ public class DocumentProcessingResult {
     private int totalExtractedCharacters;
     private int totalSentences;
     private DocumentAnalysisResult analysisResult;
+    private DocumentReviewResult reviewResult;
 
     public DocumentProcessingResult() {
     }
@@ -22,12 +23,23 @@ public class DocumentProcessingResult {
                                     int totalExtractedCharacters,
                                     int totalSentences,
                                     DocumentAnalysisResult analysisResult) {
+        this(requestId, originalFileName, documentType, totalExtractedCharacters, totalSentences, analysisResult, null);
+    }
+
+    public DocumentProcessingResult(String requestId,
+                                    String originalFileName,
+                                    DocumentType documentType,
+                                    int totalExtractedCharacters,
+                                    int totalSentences,
+                                    DocumentAnalysisResult analysisResult,
+                                    DocumentReviewResult reviewResult) {
         this.requestId = requestId;
         this.originalFileName = originalFileName;
         this.documentType = documentType;
         this.totalExtractedCharacters = totalExtractedCharacters;
         this.totalSentences = totalSentences;
         this.analysisResult = analysisResult;
+        this.reviewResult = reviewResult;
     }
 
     public String getRequestId() {
@@ -78,6 +90,14 @@ public class DocumentProcessingResult {
         this.analysisResult = analysisResult;
     }
 
+    public DocumentReviewResult getReviewResult() {
+        return reviewResult;
+    }
+
+    public void setReviewResult(DocumentReviewResult reviewResult) {
+        this.reviewResult = reviewResult;
+    }
+
     @Override
     public String toString() {
         return "DocumentProcessingResult{" +
@@ -86,6 +106,7 @@ public class DocumentProcessingResult {
                 ", documentType=" + documentType +
                 ", totalExtractedCharacters=" + totalExtractedCharacters +
                 ", totalSentences=" + totalSentences +
+                ", hasReviewResult=" + (reviewResult != null) +
                 '}';
     }
 }

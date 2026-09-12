@@ -5,8 +5,10 @@ import com.example.edusync.model.DocumentAnalysisResult;
 import com.example.edusync.model.DocumentProcessingResult;
 import com.example.edusync.model.DocumentSentence;
 import com.example.edusync.model.TextExtractionResult;
+import com.example.edusync.model.DocumentReviewResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -15,7 +17,8 @@ import java.util.UUID;
 
 /**
  * End-to-end document processing service.
- * Coordinates document validation, text extraction, sentence segmentation, and analysis orchestration.
+ * Coordinates document validation, text extraction, sentence segmentation, analysis orchestration,
+ * and server-side review session creation.
  * Does not mutate original documents or call AI/verification services directly.
  */
 @Service
@@ -27,15 +30,26 @@ public class DocumentProcessingService {
     private final TextExtractionService textExtractionService;
     private final SentenceSegmentationService sentenceSegmentationService;
     private final DocumentAnalysisOrchestrator documentAnalysisOrchestrator;
+    private final ReviewService reviewService;
 
     public DocumentProcessingService(DocumentService documentService,
                                      TextExtractionService textExtractionService,
                                      SentenceSegmentationService sentenceSegmentationService,
                                      DocumentAnalysisOrchestrator documentAnalysisOrchestrator) {
+        this(documentService, textExtractionService, sentenceSegmentationService, documentAnalysisOrchestrator, null);
+    }
+
+    @Autowired
+    public DocumentProcessingService(DocumentService documentService,
+                                     TextExtractionService textExtractionService,
+                                     SentenceSegmentationService sentenceSegmentationService,
+                                     DocumentAnalysisOrchestrator documentAnalysisOrchestrator,
+                                     ReviewService reviewService) {
         this.documentService = documentService;
         this.textExtractionService = textExtractionService;
         this.sentenceSegmentationService = sentenceSegmentationService;
         this.documentAnalysisOrchestrator = documentAnalysisOrchestrator;
+        this.reviewService = reviewService;
     }
 
     /**
@@ -73,14 +87,25 @@ public class DocumentProcessingService {
         DocumentAnalysisRequest analysisRequest = new DocumentAnalysisRequest(requestId, sentences);
         DocumentAnalysisResult analysisResult = documentAnalysisOrchestrator.analyzeDocument(analysisRequest);
 
-        // Step 6: Assemble review-ready document processing result
+        // Step 6: Create server-side in-memory review session for human review & approval
+        DocumentReviewResult reviewResult = null;
+        if (reviewService != null) {
+            reviewResult = reviewService.createReviewSession(analysisResult);
+            if (reviewResult != null) {
+                log.info("Initialized server-side review session for requestId '{}' ({} reviewable).",
+                        requestId, reviewResult.getReviewableCount());
+            }
+        }
+
+        // Step 7: Assemble review-ready document processing result
         return new DocumentProcessingResult(
                 requestId,
                 extractionResult.getFilename(),
                 extractionResult.getDocumentType(),
                 extractedText.length(),
                 sentences.size(),
-                analysisResult
+                analysisResult,
+                reviewResult
         );
     }
 }

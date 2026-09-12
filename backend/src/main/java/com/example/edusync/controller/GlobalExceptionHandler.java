@@ -3,6 +3,7 @@ package com.example.edusync.controller;
 import com.example.edusync.model.ErrorResponse;
 import com.example.edusync.service.DocumentExtractionException;
 import com.example.edusync.service.InvalidDocumentException;
+import com.example.edusync.service.ReviewValidationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -15,6 +16,12 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ReviewValidationException.class)
+    public ResponseEntity<ErrorResponse> handleReviewValidation(ReviewValidationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse("Bad Request", ex.getMessage()));
+    }
 
     @ExceptionHandler(InvalidDocumentException.class)
     public ResponseEntity<ErrorResponse> handleInvalidDocument(InvalidDocumentException ex) {

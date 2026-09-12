@@ -3,6 +3,7 @@ package com.example.edusync.service;
 import com.example.edusync.model.DocumentAnalysisRequest;
 import com.example.edusync.model.DocumentAnalysisResult;
 import com.example.edusync.model.DocumentProcessingResult;
+import com.example.edusync.model.DocumentReviewResult;
 import com.example.edusync.model.DocumentSentence;
 import com.example.edusync.model.DocumentType;
 import com.example.edusync.model.DocumentUploadResponse;
@@ -46,6 +47,9 @@ class DocumentProcessingServiceTest {
 
     @Mock
     private DocumentAnalysisOrchestrator documentAnalysisOrchestrator;
+
+    @Mock
+    private ReviewService reviewService;
 
     @InjectMocks
     private DocumentProcessingService documentProcessingService;
@@ -301,5 +305,36 @@ class DocumentProcessingServiceTest {
 
         // Verify that DocumentProcessingService made zero interactions with GeminiAnalysisService, SourceVerificationService, and ProposedUpdateService
         verifyNoInteractions(mockGeminiService, mockVerificationService, mockProposedUpdateService);
+    }
+
+    @Test
+    @DisplayName("10. Processing pipeline automatically creates server-side in-memory review session upon analysis completion")
+    void testReviewSessionCreatedOnSuccessfulAnalysis() {
+        when(documentService.validateAndProcess(validPdfFile))
+                .thenReturn(new DocumentUploadResponse("sample.pdf", 100L, "application/pdf", "Valid"));
+
+        TextExtractionResult extraction = new TextExtractionResult("sample.pdf", DocumentType.PDF, "Java 17 is LTS.", 1);
+        when(textExtractionService.extractText(validPdfFile)).thenReturn(extraction);
+        when(sentenceSegmentationService.segment(extraction)).thenReturn(List.of(new DocumentSentence(1, "Java 17 is LTS.")));
+
+        DocumentAnalysisResult orchestratorResult = new DocumentAnalysisResult(
+                "req-session-test", 1, 1, 1, 1, 1,
+                List.of(new SentencePipelineResult(1, "Java 17 is LTS.", PipelineStatus.VERIFIED_UPDATE_PROPOSED, null, null, null))
+        );
+        when(documentAnalysisOrchestrator.analyzeDocument(any(DocumentAnalysisRequest.class)))
+                .thenReturn(orchestratorResult);
+
+        DocumentReviewResult mockReviewResult = new DocumentReviewResult();
+        mockReviewResult.setRequestId("req-session-test");
+        mockReviewResult.setTotalSentences(1);
+        mockReviewResult.setReviewableCount(1);
+        when(reviewService.createReviewSession(orchestratorResult)).thenReturn(mockReviewResult);
+
+        DocumentProcessingResult result = documentProcessingService.processDocument(validPdfFile);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getReviewResult()).isNotNull();
+        assertThat(result.getReviewResult().getRequestId()).isEqualTo("req-session-test");
+        verify(reviewService).createReviewSession(orchestratorResult);
     }
 }

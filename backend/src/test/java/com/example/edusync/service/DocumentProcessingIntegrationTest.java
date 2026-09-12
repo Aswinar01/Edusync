@@ -3,9 +3,17 @@ package com.example.edusync.service;
 import com.example.edusync.model.DocumentAnalysisRequest;
 import com.example.edusync.model.DocumentAnalysisResult;
 import com.example.edusync.model.DocumentProcessingResult;
+import com.example.edusync.model.DocumentReviewResult;
 import com.example.edusync.model.DocumentType;
 import com.example.edusync.model.PipelineStatus;
+import com.example.edusync.model.ProposalStatus;
+import com.example.edusync.model.ProposedUpdate;
+import com.example.edusync.model.ReviewDecision;
+import com.example.edusync.model.ReviewStatus;
 import com.example.edusync.model.SentencePipelineResult;
+import com.example.edusync.model.SourceType;
+import com.example.edusync.model.SourceVerificationResult;
+import com.example.edusync.model.VerificationStatus;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -39,6 +47,7 @@ class DocumentProcessingIntegrationTest {
     private TextExtractionService textExtractionService;
     private SentenceSegmentationService segmentationService;
     private DocumentAnalysisOrchestrator orchestrator;
+    private ReviewService reviewService;
     private DocumentProcessingService processingService;
 
     @BeforeEach
@@ -47,11 +56,13 @@ class DocumentProcessingIntegrationTest {
         textExtractionService = new TextExtractionService();
         segmentationService = new SentenceSegmentationService();
         orchestrator = mock(DocumentAnalysisOrchestrator.class);
+        reviewService = new ReviewService();
         processingService = new DocumentProcessingService(
                 documentService,
                 textExtractionService,
                 segmentationService,
-                orchestrator
+                orchestrator,
+                reviewService
         );
     }
 
@@ -223,5 +234,100 @@ class DocumentProcessingIntegrationTest {
                 .hasMessageContaining("Document contains no readable text");
 
         verify(orchestrator, never()).analyzeDocument(any());
+    }
+
+    @Test
+    @DisplayName("End-to-End: Real Document processing automatically initializes server-side review session and allows human review decision")
+    void testRealDocumentCreatesReviewSessionAndEnforcesHumanDecisionFlow() throws IOException {
+        byte[] pdfBytes;
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 14);
+                cs.newLineAtOffset(50, 750);
+                cs.showText("Java 17 is the latest LTS release.");
+                cs.endText();
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            pdfBytes = baos.toByteArray();
+        }
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "java_curriculum.pdf",
+                "application/pdf",
+                pdfBytes
+        );
+
+        when(orchestrator.analyzeDocument(any(DocumentAnalysisRequest.class)))
+                .thenAnswer(invocation -> {
+                    DocumentAnalysisRequest req = invocation.getArgument(0);
+                    return new DocumentAnalysisResult(
+                            req.getRequestId(),
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
+                            List.of(
+                                    new SentencePipelineResult(
+                                            1,
+                                            "Java 17 is the latest LTS release.",
+                                            PipelineStatus.VERIFIED_UPDATE_PROPOSED,
+                                            null,
+                                            SourceVerificationResult.verified(
+                                                    1,
+                                                    "Java 17 is the latest LTS release.",
+                                                    "Java 21 is latest LTS",
+                                                    "Java Lifecycles",
+                                                    "https://endoflife.date/api/java.json",
+                                                    "https://www.oracle.com/java",
+                                                    SourceType.REPUTABLE
+                                            ),
+                                            ProposedUpdate.proposed(
+                                                    1,
+                                                    "Java 17 is the latest LTS release.",
+                                                    "Java 21 is the latest LTS release.",
+                                                    "Updated from Java 17 to Java 21 LTS.",
+                                                    "Java 21 is latest LTS",
+                                                    "Java Lifecycles",
+                                                    "https://endoflife.date/api/java.json",
+                                                    "https://www.oracle.com/java",
+                                                    SourceType.REPUTABLE
+                                            )
+                                    )
+                            )
+                    );
+                });
+
+        DocumentProcessingResult processResult = processingService.processDocument(file);
+
+        assertThat(processResult).isNotNull();
+        String requestId = processResult.getRequestId();
+        assertThat(requestId).isNotBlank();
+        assertThat(processResult.getReviewResult()).isNotNull();
+        assertThat(processResult.getReviewResult().getReviewableCount()).isEqualTo(1);
+        assertThat(processResult.getReviewResult().getPendingCount()).isEqualTo(1);
+
+        // Verify that server stored this review session under requestId
+        DocumentReviewResult storedSession = reviewService.getReviewSession(requestId);
+        assertThat(storedSession).isNotNull();
+        assertThat(storedSession.getItems()).hasSize(1);
+        assertThat(storedSession.getItems().get(0).getReviewStatus()).isEqualTo(ReviewStatus.PENDING);
+
+        // Human reviewer applies APPROVE decision
+        DocumentReviewResult updatedSession = reviewService.applySessionDecision(requestId, 1, ReviewDecision.APPROVE);
+        assertThat(updatedSession.getApprovedCount()).isEqualTo(1);
+        assertThat(updatedSession.getPendingCount()).isEqualTo(0);
+        assertThat(updatedSession.getItems().get(0).getReviewStatus()).isEqualTo(ReviewStatus.APPROVED);
+
+        // Verifying state machine immutability: attempting to decide again throws ReviewValidationException
+        assertThatThrownBy(() -> reviewService.applySessionDecision(requestId, 1, ReviewDecision.REJECT))
+                .isInstanceOf(ReviewValidationException.class)
+                .hasMessageContaining("already APPROVED");
     }
 }
